@@ -82,10 +82,17 @@ def make_offsets_df(bson_path=os.path.join(DATA_DIR, "train.bson"),
 
 def make_categories_df(category_names_file=os.path.join(DATA_DIR, "category_names.csv")):
     categories_df = pd.read_csv(category_names_file, index_col=0)
-    categories_df["category_idx"] = pd.Series(range(len(categories_df)), index=categories_df.index)
-    # categories_df[categories_df.columns[0] + "_EN"] = categories_df.category_level1.map(translate_category)
-    # categories_df[categories_df.columns[1] + "_EN"] = categories_df.category_level2.map(translate_category)
 
+    # converting lvl1, lvl2 and lvl3 into numerical values for training
+    d1 = {c: idx for idx, c in enumerate(categories_df.category_level1.unique())}
+    categories_df["level1_idx"] = categories_df.category_level1.map(d1)
+    d2 = {c: idx for idx, c in enumerate(categories_df.category_level2.unique())}
+    categories_df["level2_idx"] = categories_df.category_level2.map(d2)
+    categories_df["category_idx"] = pd.Series(range(len(categories_df)), index=categories_df.index)
+
+    # translating category names into english
+    categories_df[categories_df.columns[0] + "_EN"] = categories_df.category_level1.map(translate_category)
+    categories_df[categories_df.columns[1] + "_EN"] = categories_df.category_level2.map(translate_category)
 
     path = os.path.join(DATA_DIR, "categories.csv")
     categories_df.to_csv(path, index=True)

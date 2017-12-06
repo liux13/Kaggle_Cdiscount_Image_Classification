@@ -1,29 +1,46 @@
 import os
+import io
+from collections import defaultdict
+import bson
 import tensorflow as tf
 import numpy as np
+import pandas as pd
 from skimage import img_as_float
-
+from skimage.data import imread
+from skimage.exposure import rescale_intensity
+from skimage.transform import rotate
 from tensorflow import data
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework.ops import convert_to_tensor
 
 DATADIR = r"/home/femianjc/CSE627/Kaggle_Cdiscount_Image_Classification/data/"
 VGG_MEAN = np.array([103.939, 116.779, 123.68]).reshape((1,1,3))    #VGG_MEAN in bgr order
-offset_path = os.path.join(DATADIR, "categories.csv")
+offset_path = os.path.join(DATADIR, "train_offsets.csv")
+record_defaults = np.ones((8, 1)).tolist()
+IMG_DIM = 180
+OUT_DIM = 224
+IMG_CHNL = 3
 
 class ImageDataGenerator(object):
     """
     Wrapper class around the new Tensorflow's dataset pipeline.
     
     """
-    def __init__(self, csv_file_path, offset_file_path=offset_path, is_training=True, batch_size=128, shuffle=True, buffer_size=None):
+    def __init__(self,
+                 sample_file_path,
+                 offset_file_path=offset_path,
+                 is_training=True,
+                 batch_size=2,
+                 shuffle=True,
+                 buffer_size=500,
+                 same_prob=0.5):
         """Creates a new ImageDataGenerator.
         
         Receives a path string to a text file, which consists of many lines, where each line specifies the relative
         location of an image. Using this data, this class will create TensorFlow dataset that can be used to train
         rectifynet.
         
-        :param csv_file_path: Path to the text file
+        :param csv_file_path: Path to the sample csv file
         :param offset_path: Path to the offset file for record random retrieval
         :param mode: A boolean value indicating "train" or "validation" status. Depending on this value, preprocessing
             is done differently.
@@ -32,50 +49,103 @@ class ImageDataGenerator(object):
         :param buffer_size: Number of image dirs used as buffer for TensorFlows shuffling of the dataset. 
             If not specified, the entire txt_file will be buffered into memory for shuffling.
         """
-        self.csv_file_path = csv_file_path
-        self.offset_file_path = offset_path
-        self._read_txt_file()
+        self.sample_file_path = sample_file_path
+        self.offset_file_path = offset_file_path
         self.is_training = is_training
+        self.buffer_size = buffer_size
+        self.batch_size = batch_size
+        self.same_prob = same_prob
 
-        # initial shuffling of the file
-        if shuffle:
-            np.random.shuffle(self.img_paths)
-
-        self.buffer_size = buffer_size if buffer_size is not None else len(self.img_paths)
-
-        # convert img_paths list to TF tensor
-        self.img_paths = convert_to_tensor(self.img_paths, dtype=dtypes.string)
-        # print os.path.abspath(os.path.pardir)
-        dataset = data.Dataset.from_tensor_slices(self.img_paths)
+        self._read_csv_file()
+        dataset = data.TextLineDataset(sample_file_path).skip(1)
         if shuffle:
             dataset = dataset.shuffle(buffer_size=self.buffer_size)
 
-        # preprocess img by rescaling, warping, returns bgr image and labels on the fly
-        dataset = dataset.map(lambda imgpath: tf.py_func(self._data_augment, [imgpath], [tf.float32, tf.float32]))
-        # batch sizing data
-        self.data = dataset.batch(batch_size)
+        dataset = dataset.map(lambda row: tf.py_func(self._data_augment,
+                                                     [row, True],
+                                                     [tf.float32, tf.float32, tf.int16, tf.int16, tf.int16]))
+        self.data = dataset.batch(self.batch_size)
 
 
+    def _read_csv_file(self):
+        self._dataframe = pd.read_csv(self.sample_file_path, index_col=0)
+        self._lvl3_dict = defaultdict(list)         #{label: product_ids}
+        for ir in self._dataframe.itertuples():
+            self._lvl3_dict[ir[-1]].append(ir[0])
 
-    def _read_txt_file(self):
-        """Read the content of the text file and store it into lists."""
-        self.img_paths = []
-        with open(self.txt_file_path, 'r') as f:
-            lines = f.readlines()
-            for line in lines:
-                self.img_paths.append(line.strip())
+    def _get_pair_product_id(self, label, isSame):
 
-    def _data_augment(self, imgpath, stdev=0.1):
+        if not isSame:
+            label_ = np.random.choice(self._lvl3_dict.keys())
+            while (label_ == label):
+                label_ = np.random.choice(self._lvl3_dict.keys())
+            label = label_
+
+        product_id = np.random.choice(self._lvl3_dict[label], size=1)[0]
+        row = self._dataframe[self._dataframe.index==product_id]
+
+        return row, label
+
+
+    def _data_augment(self, row, find_pair=False):
         """
-           This function takes a single imagepath as input, warp it randomly and returns 4 numbers as targets
+           This function takes a single row of df as input, warp it randomly and returns 4 numbers as targets
         """
-        f = np.load(DATADIR + os.path.splitext(imgpath)[0] + '.npz')
+        if isinstance(row, str):
+            cols = [int(x) for x in row.split(',')]
+            num_imgs = cols[1]
+            offset = cols[2]
+            length = cols[3]
+            label = cols[-1]
+        else:
+            num_imgs, offset, length, _, _, _, label = row.values[0]
 
-        im = img_as_float(f[f.keys()[0]])
-        target = np.random.normal(scale=stdev, size=4).astype(np.float32)
-        warped = warp_image(im, *target)
+        x1 = np.random.rand(4, OUT_DIM, OUT_DIM, IMG_CHNL)*255.
 
-        # rescale and rgb->bgr, subtract mean. These are pre-processing steps
-        warped_scaled_bgr = (warped * 255.0)[:,:,::-1]
-        bgr = (warped_scaled_bgr - VGG_MEAN).astype(np.float32)
-        return bgr, target
+        with open(os.path.join(DATADIR, "train.bson")) as b:
+            b.seek(offset)
+            sample = b.read(length)
+            item = bson.BSON(sample).decode()
+
+            for i in range(num_imgs):
+                pic = imread(io.BytesIO(item['imgs'][i]['picture']))
+
+                # rescale and padding
+                b_pic = np.random.random(size=(2 * IMG_DIM, 2 * IMG_DIM, 3)) * 255.
+                center = np.array(b_pic.shape[:2]) / 2
+                b_pic[center[0] - IMG_DIM / 2:center[0] + IMG_DIM / 2,
+                center[1] - IMG_DIM / 2:center[1] + IMG_DIM / 2] = pic
+
+                if self.is_training:
+                    # rotate
+                    angle = np.random.randint(20)
+                    b_pic = rotate(b_pic, angle, mode='reflect')
+
+                    # flip
+                    dice = np.random.random(1)
+                    if dice > 0.75:
+                        b_pic = np.fliplr(b_pic)
+                    elif dice > 0.5:
+                        b_pic = np.flipud(b_pic)
+
+                    b_pic = rescale_intensity(
+                        b_pic,
+                        in_range='image',
+                        out_range=(np.random.randint(0, 127),
+                        np.random.randint(127, 255))
+                    )
+
+                # cropping to correct output dimension
+                cropped = b_pic[center[0] - OUT_DIM / 2:center[0] + OUT_DIM / 2,
+                          center[1] - OUT_DIM / 2:center[1] + OUT_DIM / 2]
+                # bgr and subtract mean
+                cropped = cropped[:,:,::-1]-VGG_MEAN
+                x1[i, ...] = cropped
+
+        if find_pair:
+            isSame = np.random.random(size=1) > self.same_prob
+            row, _label = self._get_pair_product_id(label, isSame=isSame[0])
+            x2, _ = self._data_augment(row, find_pair=False)
+            return x1.astype(np.float32), x2, np.int16(isSame[0]), np.int16(label), np.int16(_label)
+
+        return x1.astype(np.float32), np.int16(label)
