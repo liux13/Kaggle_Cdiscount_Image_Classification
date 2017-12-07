@@ -1,52 +1,64 @@
 import tensorflow as tf
 import numpy as np
+import time
+import os
 
-
-weight_path = r"/home/femianjc/CSE627/Kaggle_Cdiscount_Image_Classification/src/vgg16_weights.npz"
+SAVE_DIR = r"/home/femianjc/CSE627/Kaggle_Cdiscount_Image_Classification/temp"
+weight_path = os.path.join(SAVE_DIR, "vgg16_weights.npz")
 
 class CNN_SiameseNet(object):
     """Implementation of the SiameseNet Using AlexNet Structure"""
-    def __init__(self, x1, x2, weight_path=weight_path):
+    def __init__(self, left, right, weight_path=weight_path, trainable=True):
         """
         Create the computation graph of the SiameseNet
-        :param x: Placeholder for the input tensor
+        :param left, right: Input tensors. Siamese requires a pair of input
         :param weight_path: Complete path to the pretrained weight file.
         """
-        self.data_dict = np.load(weight_path, encoding='latin1')
+        if weight_path is not None:
+            self.data_dict = np.load(weight_path, encoding='latin1')
+            print "Using saved weight:{}".format(weight_path)
+        else:
+            self.data_dict = None
+            print "No weight initialization."
+        self.trainable = trainable
+        self.var_dict = {}
 
-        assert len(x1.get_shape()) == 5
-        self.build_siamese_twins(x1[0])
+        # self.siamese_twins(left, right, train_mode=True, reuse=False)
+
+    def build(self, left, right, reuse=False):
+        assert left.get_shape().as_list() == right.get_shape().as_list()
+        left_list = [tf.squezze(s, [1]) for s in tf.split(left, num_or_size_splits=4, axis=1)]
 
 
-    def build_siamese_twins(self, x):
+    def siamese_twins(self, left, right, train_mode=True, reuse=False):
 
         # First bottleneck
-        self.conv1_1 = self._conv_layer(x, 3, 64, "conv1_1")              # 3x3 -> 224x224x64
-        self.conv1_2 = self._conv_layer(self.conv1_1, 64, 64, "conv1_2")    # 3x3 -> 224x224x64
-        self.pool1 = self._max_pool(self.conv1_2, 'pool1')                  # -> 112x112x64
+        conv1_1 = self._conv_layer(left, 3, 64, "conv1_1", reuse=reuse)              # 3x3 -> 224x224x64
+        conv1_2 = self._conv_layer(conv1_1, 64, 64, "conv1_2", reuse=reuse)    # 3x3 -> 224x224x64
+        pool1 = self._max_pool(conv1_2, 'pool1')                  # -> 112x112x64
 
         # Second bottleneck
-        self.conv2_1 = self._conv_layer(self.pool1, 64, 128, "conv2_1")     # 3x3 -> 112x112x128
-        self.conv2_2 = self._conv_layer(self.conv2_1, 128, 128, "conv2_2")  # 3x3 -> 112x112x128
-        self.pool2 = self._max_pool(self.conv2_2, 'pool2')                  # -> 56x56x128
+        conv2_1 = self._conv_layer(pool1, 64, 128, "conv2_1", reuse=reuse)     # 3x3 -> 112x112x128
+        conv2_2 = self._conv_layer(conv2_1, 128, 128, "conv2_2", reuse=reuse)  # 3x3 -> 112x112x128
+        pool2 = self._max_pool(conv2_2, 'pool2')                  # -> 56x56x128
 
         # Third bottleneck
-        self.conv3_1 = self._conv_layer(self.pool2, 128, 256, "conv3_1")    # 3x3 -> 56x56x256
-        self.conv3_2 = self._conv_layer(self.conv3_1, 256, 256, "conv3_2")  # 3x3 -> 56x56x256
-        self.conv3_3 = self._conv_layer(self.conv3_2, 256, 256, "conv3_3")  # 3x3 -> 56x56x256
-        self.pool3 = self._max_pool(self.conv3_3, 'pool3')                  # -> 28x28x256
+        conv3_1 = self._conv_layer(pool2, 128, 256, "conv3_1", reuse=reuse)    # 3x3 -> 56x56x256
+        conv3_2 = self._conv_layer(conv3_1, 256, 256, "conv3_2", reuse=reuse)  # 3x3 -> 56x56x256
+        conv3_3 = self._conv_layer(conv3_2, 256, 256, "conv3_3", reuse=reuse)  # 3x3 -> 56x56x256
+        pool3 = self._max_pool(conv3_3, 'pool3')                  # -> 28x28x256
 
         # Fourth bottleneck
-        self.conv4_1 = self._conv_layer(self.pool3, 256, 512, "conv4_1")    # 3x3 -> 28x28x512
-        self.conv4_2 = self._conv_layer(self.conv4_1, 512, 512, "conv4_2")  # 3x3 -> 28x28x512
-        self.conv4_3 = self._conv_layer(self.conv4_2, 512, 512, "conv4_3")  # 3x3 -> 28x28x512
-        self.pool4 = self._max_pool(self.conv4_3, 'pool4')                  # -> 14x14x512
+        conv4_1 = self._conv_layer(pool3, 256, 512, "conv4_1", reuse=reuse)    # 3x3 -> 28x28x512
+        conv4_2 = self._conv_layer(conv4_1, 512, 512, "conv4_2", reuse=reuse)  # 3x3 -> 28x28x512
+        conv4_3 = self._conv_layer(conv4_2, 512, 512, "conv4_3", reuse=reuse)  # 3x3 -> 28x28x512
+        pool4 = self._max_pool(conv4_3, 'pool4')                  # -> 14x14x512
 
         # Fifth bottleneck
-        self.conv5_1 = self._conv_layer(self.pool4, 512, 512, "conv5_1")    # 3x3 -> 14x14x512
-        self.conv5_2 = self._conv_layer(self.conv5_1, 512, 512, "conv5_2")  # 3x3 -> 14x14x512
-        self.conv5_3 = self._conv_layer(self.conv5_2, 512, 512, "conv5_3")  # 3x3 -> 14x14x512
-        self.pool5 = self._max_pool(self.conv5_3, 'pool5')  # -> 7x7x512
+        conv5_1 = self._conv_layer(pool4, 512, 512, "conv5_1", reuse=reuse)    # 3x3 -> 14x14x512
+        conv5_2 = self._conv_layer(conv5_1, 512, 512, "conv5_2", reuse=reuse)  # 3x3 -> 14x14x512
+        conv5_3 = self._conv_layer(conv5_2, 512, 512, "conv5_3", reuse=reuse)  # 3x3 -> 14x14x512
+        self.pool5 = self._max_pool(conv5_3, 'pool5')  # -> 7x7x512
 
         # # Global inference layer 1
         # self.fc6 = self._fc_layer(self.pool5, 25088, 4096, "fc6")           # 25088 -> 4096
@@ -60,14 +72,14 @@ class CNN_SiameseNet(object):
         # self.output = self._fc_layer(self.relu7, 4096, 4, name="output")    # 4096 -> 4 [num predictions]
         # self.data_dict = None
 
-        # print "Model building finished: %ds" % (time.time() - start_time)
-        return self.output
+
+        return self.pool5
 
     def _max_pool(self, bottom, name):
         return tf.nn.max_pool(bottom, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME", name=name)
 
-    def _conv_layer(self, bottom, in_channels, out_channels, name):
-        with tf.variable_scope(name):
+    def _conv_layer(self, bottom, in_channels, out_channels, name, reuse):
+        with tf.variable_scope(name, reuse=reuse):
             filters = self._get_var(name + "_W")
             conv_biases = self._get_var(name + "_b")
 
@@ -91,4 +103,19 @@ class CNN_SiameseNet(object):
     def _get_var(self, name):
         assert isinstance(name, str)
         return tf.constant(self.data_dict.item()[name])
+
+
+    def save_npz(self, sess, npy_path=os.path.join(SAVE_DIR, "CNN_Siamese.npz")):
+        # assert isinstance(sess, tf.Session)
+        timestr = "-" + time.strftime("%Y%m%d_%H%M")
+        file_path = npy_path[:-4] + timestr + npy_path[-4:]
+        data_dict = {}
+        for name, var in list(self.var_dict.items()):
+            var_out = sess.run(var)
+            if name not in data_dict:
+                data_dict[name] = {}
+            data_dict[name]= var_out
+
+        np.savez(file_path, **data_dict)
+        print "File saved as:", file_path
 
