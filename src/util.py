@@ -16,14 +16,16 @@ VGG_MEAN = np.array([103.939, 116.779, 123.68]).reshape((1,1,3))
 
 def visualize_batch(batch, display_num=2, category_file_path=category_file_path):
 
-    x1, x2, isSame, x1_labels, x2_labels = batch
+    x1, x1_mask, x2, x2_mask, isSame, x1_labels, x2_labels = batch
     batch_size = len(isSame)
+    # print batch_size
 
     fig, axes = plt.subplots(display_num, 8)
     fig.set_size_inches(2.5 * 8, 2.5 * display_num)
 
     for row in range(display_num):
         prod_pair_idx = row if display_num >= batch_size else np.random.randint(0, batch_size)
+        # print prod_pair_idx
         for col in range(8):
             axes[row, col].set_xticks([])
             axes[row, col].set_yticks([])
@@ -36,6 +38,10 @@ def visualize_batch(batch, display_num=2, category_file_path=category_file_path)
                 record = categories_df[categories_df.category_idx == x2_labels[prod_pair_idx]]
                 lvl3 = translator.translate(record.category_level3.values[0].lower(), src='fr').text
                 axes[row, col].set_title(lvl3)
+            if col == 2:
+                axes[row,col].set_title(x1_mask[prod_pair_idx])
+            elif col == 6:
+                axes[row,col].set_title(x2_mask[prod_pair_idx])
             axes[row, col].set_xticks([])
             axes[row, col].set_yticks([])
             plt.sca(axes[row, col])

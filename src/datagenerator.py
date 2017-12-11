@@ -40,9 +40,9 @@ class ImageDataGenerator(object):
         location of an image. Using this data, this class will create TensorFlow dataset that can be used to train
         rectifynet.
         
-        :param csv_file_path: Path to the sample csv file
+        :param sample_file_path: Path to the sample csv file
         :param offset_path: Path to the offset file for record random retrieval
-        :param mode: A boolean value indicating "train" or "validation" status. Depending on this value, preprocessing
+        :param mode: A boolean value indicating "train" or "validation" status. Depending on this value, pre-processing
             is done differently.
         :param batch_size: Number of images per batch.
         :param shuffle: Whether or not to shuffle the data in the dataset and the initial file list.
@@ -55,7 +55,7 @@ class ImageDataGenerator(object):
         self.buffer_size = buffer_size
         self.batch_size = batch_size
         self.same_prob = same_prob
-
+        self.prod_indices = range(batch_size)
         self._read_csv_file()
         dataset = data.TextLineDataset(sample_file_path).skip(1)
         if shuffle:
@@ -63,7 +63,7 @@ class ImageDataGenerator(object):
 
         dataset = dataset.map(lambda row: tf.py_func(self._data_augment,
                                                      [row, True],
-                                                     [tf.float32, tf.float32, tf.int16, tf.int16, tf.int16]))
+                                                     [tf.float32, tf.bool, tf.float32, tf.bool, tf.int32, tf.int16, tf.int16]))
         self.data = dataset.batch(self.batch_size)
 
 
@@ -101,6 +101,7 @@ class ImageDataGenerator(object):
             num_imgs, offset, length, _, _, _, label = row.values[0]
 
         x1 = np.random.rand(4, OUT_DIM, OUT_DIM, IMG_CHNL)*255.
+        mask = np.zeros((4, )).astype(bool)
 
         with open(os.path.join(DATADIR, "train.bson")) as b:
             b.seek(offset)
@@ -108,6 +109,7 @@ class ImageDataGenerator(object):
             item = bson.BSON(sample).decode()
 
             for i in range(num_imgs):
+                mask[i] = True
                 pic = imread(io.BytesIO(item['imgs'][i]['picture']))
 
                 # rescale and padding
@@ -145,7 +147,8 @@ class ImageDataGenerator(object):
         if find_pair:
             isSame = np.random.random(size=1) > self.same_prob
             row, _label = self._get_pair_product_id(label, isSame=isSame[0])
-            x2, _ = self._data_augment(row, find_pair=False)
-            return x1.astype(np.float32), x2, np.int16(isSame[0]), np.int16(label), np.int16(_label)
+            x2, mask2, num_imgs2, _ = self._data_augment(row, find_pair=False)
+            return x1.astype(np.float32), mask, x2, mask2, np.int32(isSame[0]), np.int16(label), np.int16(_label)
 
-        return x1.astype(np.float32), np.int16(label)
+
+        return x1.astype(np.float32), mask, num_imgs, np.int32(label)

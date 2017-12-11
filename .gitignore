@@ -110,3 +110,4 @@ venv.bak/
 data/
 *.tfrecords
 *.npz
+temp/
