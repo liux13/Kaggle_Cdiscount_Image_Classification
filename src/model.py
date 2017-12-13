@@ -47,22 +47,30 @@ class CNN_SiameseNet(object):
                 valid_indexes.append(prod_idxs[prod] + i)
         return np.array(valid_indexes).astype(np.int32)
 
-    def build(self, left, left_mask, right, right_mask, y, margin=0.2, keep_prob=0.5):
+    def build(self, left, left_mask, right=None, right_mask=None, y=None, margin=0.2, keep_prob=0.5):
         print "Model building started."
+
+        assert (not right) == (not right_mask) == (not y)
+        inference_mode = not y
 
         left.set_shape([None, 4, IMG_DIM, IMG_DIM, IMG_CHNL])
         left_mask.set_shape([None, 4])
-        right.set_shape([None, 4, IMG_DIM, IMG_DIM, IMG_CHNL])
-        right_mask.set_shape([None, 4])
-        y.set_shape([None, ])
+
+        if not inference_mode:
+            right.set_shape([None, 4, IMG_DIM, IMG_DIM, IMG_CHNL])
+            right_mask.set_shape([None, 4])
+            y.set_shape([None, ])
 
         start_time = time.time()
         self.o1 = self.siamese_twins(left, left_mask, train_mode=self.trainable, first_run=True, keep_prob=keep_prob)
-        self.o2 = self.siamese_twins(right, right_mask, train_mode=self.trainable, first_run=False, keep_prob=keep_prob)
-        assert self.o1.get_shape().as_list() == self.o2.get_shape().as_list()
 
-        self.loss = self.loss_with_spring(self.o1, self.o2, y, margin=5)
-        self.r_loss = self.loss
+        if not inference_mode:
+            self.o2 = self.siamese_twins(
+                right, right_mask, train_mode=self.trainable, first_run=False, keep_prob=keep_prob)
+            assert self.o1.get_shape().as_list() == self.o2.get_shape().as_list()
+
+            self.loss = self.loss_with_spring(self.o1, self.o2, y, margin=5)
+            self.r_loss = self.loss
         print "Model building finished: %ds" %(time.time() - start_time)
 
     def siamese_twins(self, x, mask, train_mode=True, first_run=True, keep_prob=0.5):
@@ -174,7 +182,7 @@ class CNN_SiameseNet(object):
         else:
             var = tf.constant(value, dtype=tf.float32, name=name)
 
-        self.var_dict[var.name] = var
+        self.var_dict[name] = var
 
         assert var.get_shape() == initial_value.get_shape()
 
@@ -202,6 +210,7 @@ class CNN_SiameseNet(object):
 
             eucd2 = tf.pow(tf.subtract(o1, o2), 2)
             eucd2 = tf.reduce_sum(eucd2, 1)
+            eucd = tf.sqrt(eucd2 + 1e-6, name="eucd")
 
             C = tf.constant(margin, name="C")
             pos = tf.multiply(labels_t, eucd2, name="yi_x_eucd2")

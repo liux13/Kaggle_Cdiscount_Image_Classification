@@ -5,13 +5,10 @@ import bson
 import tensorflow as tf
 import numpy as np
 import pandas as pd
-from skimage import img_as_float
 from skimage.data import imread
 from skimage.exposure import rescale_intensity
 from skimage.transform import rotate
 from tensorflow import data
-from tensorflow.python.framework import dtypes
-from tensorflow.python.framework.ops import convert_to_tensor
 
 DATADIR = r"/home/femianjc/CSE627/Kaggle_Cdiscount_Image_Classification/data/"
 VGG_MEAN = np.array([103.939, 116.779, 123.68]).reshape((1,1,3))    #VGG_MEAN in bgr order
@@ -33,7 +30,8 @@ class ImageDataGenerator(object):
                  batch_size=2,
                  shuffle=True,
                  buffer_size=500,
-                 same_prob=0.5):
+                 same_prob=0.5,
+                 inference_mode=False):
         """Creates a new ImageDataGenerator.
         
         Receives a path string to a text file, which consists of many lines, where each line specifies the relative
@@ -56,18 +54,31 @@ class ImageDataGenerator(object):
         self.batch_size = batch_size
         self.same_prob = same_prob
         self.prod_indices = range(batch_size)
-        self._read_csv_file()
+        self.inference_mode = inference_mode
+        if not self.inference_mode:
+            self._read_csv_file()
         dataset = data.TextLineDataset(sample_file_path).skip(1)
-        if shuffle:
+
+        if shuffle and not self.inference_mode:
             dataset = dataset.shuffle(buffer_size=self.buffer_size)
 
-        dataset = dataset.map(lambda row: tf.py_func(self._data_augment,
-                                                     [row, True],
-                                                     [tf.float32, tf.bool, tf.float32, tf.bool, tf.int32, tf.int16, tf.int16]))
+        if not self.inference_mode:
+            dataset = dataset.map(lambda row: tf.py_func(self._data_augment,
+                                                         [row, True],
+                                                         [tf.float32, tf.bool, tf.float32,
+                                                          tf.bool, tf.int32, tf.int16, tf.int16]),
+                                  num_parallel_calls=8)
+        else:
+            dataset = dataset.map( lambda row: tf.py_func(self._data_augment,
+                                                        [row, False],
+                                                        [tf.float32, tf.bool, tf.int32, tf.int32]),
+                                  num_parallel_calls=8)
+
         self.data = dataset.batch(self.batch_size)
 
 
     def _read_csv_file(self):
+        print "Making look up table..."
         self._dataframe = pd.read_csv(self.sample_file_path, index_col=0)
         self._lvl3_dict = defaultdict(list)         #{label: product_ids}
         for ir in self._dataframe.itertuples():
@@ -93,6 +104,7 @@ class ImageDataGenerator(object):
         """
         if isinstance(row, str):
             cols = [int(x) for x in row.split(',')]
+            product_id = cols[0]
             num_imgs = cols[1]
             offset = cols[2]
             length = cols[3]
@@ -151,4 +163,5 @@ class ImageDataGenerator(object):
             return x1.astype(np.float32), mask, x2, mask2, np.int32(isSame[0]), np.int16(label), np.int16(_label)
 
 
-        return x1.astype(np.float32), mask, num_imgs, np.int32(label)
+        # return x1.astype(np.float32), mask, np.int32(num_imgs), np.int32(label)
+        return x1.astype(np.float32), mask, np.int32(label), np.int32(product_id)
