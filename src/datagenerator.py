@@ -66,13 +66,11 @@ class ImageDataGenerator(object):
             dataset = dataset.map(lambda row: tf.py_func(self._data_augment,
                                                          [row, True],
                                                          [tf.float32, tf.bool, tf.float32,
-                                                          tf.bool, tf.int32, tf.int16, tf.int16]),
-                                  num_parallel_calls=8)
+                                                          tf.bool, tf.int32, tf.int16, tf.int16]))
         else:
             dataset = dataset.map( lambda row: tf.py_func(self._data_augment,
                                                         [row, False],
-                                                        [tf.float32, tf.bool, tf.int32, tf.int32]),
-                                  num_parallel_calls=8)
+                                                        [tf.float32, tf.bool, tf.int32, tf.int32]))
 
         self.data = dataset.batch(self.batch_size)
 
@@ -163,5 +161,5 @@ class ImageDataGenerator(object):
             return x1.astype(np.float32), mask, x2, mask2, np.int32(isSame[0]), np.int16(label), np.int16(_label)
 
 
-        # return x1.astype(np.float32), mask, np.int32(num_imgs), np.int32(label)
-        return x1.astype(np.float32), mask, np.int32(label), np.int32(product_id)
+        return x1.astype(np.float32), mask, np.int32(num_imgs), np.int32(label)
+        # return x1.astype(np.float32), mask, np.int32(label), np.int32(product_id)

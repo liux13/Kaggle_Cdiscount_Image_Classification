@@ -50,8 +50,8 @@ class CNN_SiameseNet(object):
     def build(self, left, left_mask, right=None, right_mask=None, y=None, margin=0.2, keep_prob=0.5):
         print "Model building started."
 
-        assert (not right) == (not right_mask) == (not y)
-        inference_mode = not y
+        assert (right is None) == (right_mask is None) == (y is None)
+        inference_mode = y is None
 
         left.set_shape([None, 4, IMG_DIM, IMG_DIM, IMG_CHNL])
         left_mask.set_shape([None, 4])
@@ -70,7 +70,7 @@ class CNN_SiameseNet(object):
             assert self.o1.get_shape().as_list() == self.o2.get_shape().as_list()
 
             self.loss = self.loss_with_spring(self.o1, self.o2, y, margin=5)
-            self.r_loss = self.loss
+
         print "Model building finished: %ds" %(time.time() - start_time)
 
     def siamese_twins(self, x, mask, train_mode=True, first_run=True, keep_prob=0.5):
@@ -107,21 +107,26 @@ class CNN_SiameseNet(object):
         conv5_2 = self._conv_layer(conv5_1, 512, 512, "conv5_2")  # 3x3 -> 14x14x512
         conv5_3 = self._conv_layer(conv5_2, 512, 512, "conv5_3")  # 3x3 -> 14x14x512
         pool5 = self._max_pool(conv5_3, 'pool5')                  # -> 7x7x512
-
+        tf.summary.histogram('pool5', pool5)
         # Inference layer1
         fc6 = self._fc_layer(pool5, 25088, 4096, "fc6")
+        tf.summary.histogram('fc6', fc6)
+
         relu6 = tf.nn.relu(fc6)
         if train_mode:
             relu6 = tf.nn.dropout(relu6, keep_prob)
+            tf.summary.histogram('relu6', relu6)
 
         # Inference layer2
         fc7 = self._fc_layer(relu6, 4096, 4096, "fc7")
         relu7 = tf.nn.relu(fc7)
         if train_mode:
             relu7 = tf.nn.dropout(relu7, keep_prob)
+            tf.summary.histogram('relu7', relu7)
 
         # Inference layer3
         fc_8 = self._fc_layer(relu7, 4096, 128, "fc_8")
+        tf.summary.histogram('fc_8', fc_8)
 
         # compute product coordinates
         with tf.name_scope("embedding"):

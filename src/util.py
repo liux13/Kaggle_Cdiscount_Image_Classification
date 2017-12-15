@@ -67,16 +67,19 @@ def get_product(product_id):
             pic.append(imread(io.BytesIO(item['imgs'][i]['picture'])))
     return pic
 
-def plot_lvl2_products(lvl2_str):
-    category_ids = categories_df[categories_df.category_level2 == lvl2_str].index
+def plot_lvl_products(level, lvl_str):
+    category_ids = categories_df[categories_df[level] == lvl_str].index
     random_category_id = np.random.choice(category_ids)
+    lvl2_str = categories_df[categories_df.index == random_category_id].category_level2.values[0]
     lvl3_str = categories_df[categories_df.index == random_category_id].category_level3.values[0]
 
     product_id = np.random.choice(
         train_offsets_df[train_offsets_df.category_id == random_category_id].index)
     pic = get_product(product_id)
 
-    return pic, translator.translate(lvl3_str.lower(), src='fr').text
+    return (pic,
+            translator.translate(lvl2_str.lower(), src='fr').text,
+            translator.translate(lvl3_str.lower(), src='fr').text)
 
 def plot_lvl3_products(lvl3_str):
     category_id = categories_df[categories_df.category_level3==lvl3_str].index
